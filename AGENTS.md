@@ -97,3 +97,7 @@ PYTHONPATH=../A-core/src:src .venv/bin/python -m pytest tests/
 ## Reference
 
 Based on [autish sekurkopio](https://github.com/Ron-RONZZ-org/autish/blob/master/autish/commands/sekurkopio.py) — the original implementation in the legacy autish project.
+
+## Branch Convention
+
+All A-* repos use `main` as the primary branch. Use `main` for all development.

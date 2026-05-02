@@ -261,3 +261,7 @@ This project is licensed under the GPL v3 License - see the [LICENSE](LICENSE) f
 ---
 
 **Note:** This plugin is part of the A project rewrite of [autish](https://github.com/Ron-RONZZ-org/autish/).
+
+---
+
+**Branch:** Use `main` for all development.
