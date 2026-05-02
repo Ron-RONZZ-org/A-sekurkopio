@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "A-sekurkopio"
+version = "0.1.0"
+description = "A sekurkopio plugin - backup and restore A data"
+readme = "README.md"
+license = "GPL-3.0-only"
+authors = [{name = "Rong ZHOU", email = "rong.zhou6@etu.univ-lorraine.fr"}]
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+backup = ["py7zr>=0.20"]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+]
+
+[project.entry-points."A.commands"]
+sekurkopio = "A_sekurkopio.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/A_sekurkopio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# Poetry kept for local path dependency
+[tool.poetry]
+name = "A-sekurkopio"
+version = "0.1.0"
+description = "A sekurkopio plugin - backup and restore A data"
+authors = ["Rong ZHOU <rong.zhou6@etu.univ-lorraine.fr>"]
+readme = "README.md"
+license = "GPL-3.0-only"
+packages = [{ include = "A_sekurkopio", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+A-core = { path = "../A-core" }
+
+[tool.poetry.plugins."A.commands"]
+sekurkopio = "A_sekurkopio.cli:app"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8"
+typer = { version = ">=0.12", python = "<4.0" }
+rich = ">=13.0"
