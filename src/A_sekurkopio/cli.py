@@ -430,4 +430,511 @@ def _detect_formato(path: Path) -> str:
     return "7z"
 
 
+@app.command("daemon")
+def daemon(
+    pasvorto_dosiero: str | None = typer.Option(
+        None,
+        "-p",
+        "--pasvorto-dosiero",
+        help=tr_multi(
+            "Vojo al dosiero enhavanta la pasvorton (unu linio).",
+            "Path to file containing password (one line).",
+            "Chemin du fichier contenant le mot de passe (une ligne).",
+        ),
+    ),
+    unufoje: bool = typer.Option(
+        False,
+        "--unufoje",
+        help=tr_multi(
+            "Fari unu sekurkopio kaj eliri (por systemd/cron).",
+            "Run one backup and exit (for systemd/cron).",
+            "Effectuer une sauvegarde et quitter (pour systemd/cron).",
+        ),
+    ),
+) -> None:
+    """Ruli axtomatan sekurkopion daemono."""
+    import signal
+    import time
+
+    strategy = _service.load_auto_strategy()
+    if not strategy or not strategy.get("aktiva"):
+        error(
+            tr_multi(
+                "Neniu aktiva axtomata strategio.\nRulu: sekurkopio auto [dosierujo]",
+                "No active automatic strategy.\nRun: sekurkopio auto [directory]",
+                "Aucune strategie active.\nExecution: sekurkopio auto [repertoire]",
+            )
+        )
+        raise typer.Exit(1)
+
+    if not pasvorto_dosiero:
+        error(
+            tr_multi(
+                "--pasvorto-dosiero estas deviga por daemono.",
+                "--pasvorto-dosiero is required for daemon.",
+                "--pasvorto-dosiero est requis pour le daemon.",
+            )
+        )
+        raise typer.Exit(1)
+
+    pw_path = Path(pasvorto_dosiero).expanduser()
+    if not pw_path.exists():
+        error(
+            tr_multi(
+                f"Pasvorta dosiero ne trovita: {pw_path}",
+                f"Password file not found: {pw_path}",
+                f"Fichier mot de passe non trouve: {pw_path}",
+            )
+        )
+        raise typer.Exit(1)
+
+    try:
+        pasvorto = pw_path.read_text(encoding="utf-8").strip()
+    except OSError as e:
+        error(
+            tr_multi(
+                f"Legado de pasvorta dosiero malsuktesis: {e}",
+                f"Failed to read password file: {e}",
+                f"Echec de lecture du fichier mot de passe: {e}",
+            )
+        )
+        raise typer.Exit(1) from e
+
+    if not pasvorto:
+        error(
+            tr_multi(
+                "Pasvorta dosiero estas malplena.",
+                "Password file is empty.",
+                "Le fichier mot de passe est vide.",
+            )
+        )
+        raise typer.Exit(1)
+
+    dosierujo = Path(strategy["dosierujo"])
+    intervalo_min = strategy["intervalo"]
+    nombro = strategy["nombro"]
+
+    if unufoje:
+        try:
+            info(f"[*] {datetime.now(timezone.utc).isoformat()}")
+            info(
+                tr_multi(
+                    "Komencante axtomatan sekurkopion...",
+                    "Starting automatic backup...",
+                    "Demarrage de la sauvegarde automatique...",
+                )
+            )
+            out = _do_auto_backup(dosierujo, pasvorto, nombro)
+            _service.push_history("daemon", {"dosiero": str(out)})
+            info(
+                tr_multi(
+                    f"Sekurkopio kreita: {out.name}",
+                    f"Backup created: {out.name}",
+                    f"Sauvegarde creee: {out.name}",
+                )
+            )
+        except (OSError, ValueError) as e:
+            error(
+                tr_multi(
+                    f"Eraro dum sekurkopio: {e}",
+                    f"Backup error: {e}",
+                    f"Erreur de sauvegarde: {e}",
+                )
+            )
+            raise typer.Exit(1) from e
+        return
+
+    info(
+        tr_multi(
+            f"Sekurkopio daemono startita.\n  Dosierujo : {dosierujo}\n  Intervalo : {intervalo_min} min\n  Maks. kopioj: {nombro}",
+            f"Sekurkopio daemon started.\n  Directory : {dosierujo}\n  Interval : {intervalo_min} min\n  Max copies: {nombro}",
+            f"Daemon sekurkopio demarre.\n  Repertoire : {dosierujo}\n  Intervalle : {intervalo_min} min\n  Max copies: {nombro}",
+        )
+    )
+
+    shutdown_requested = False
+
+    def signal_handler(signum, frame):
+        nonlocal shutdown_requested
+        shutdown_requested = True
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    last_backup_time = 0.0
+    intervalo_sec = intervalo_min * 60
+
+    info(
+        tr_multi(
+            f"Unua sekurkopio post {intervalo_min} min...",
+            f"First backup in {intervalo_min} min...",
+            f" premiere sauvegarde dans {intervalo_min} min...",
+        )
+    )
+
+    while not shutdown_requested:
+        now = time.time()
+        if now - last_backup_time >= intervalo_sec:
+            try:
+                info(f"[*] {datetime.now(timezone.utc).isoformat()}")
+                info(
+                    tr_multi(
+                        "Komencante axtomatan sekurkopion...",
+                        "Starting automatic backup...",
+                        "Demarrage de la sauvegarde automatique...",
+                    )
+                )
+                out = _do_auto_backup(dosierujo, pasvorto, nombro)
+                _service.push_history("daemon", {"dosiero": str(out)})
+                info(
+                    tr_multi(
+                        f"Sekurkopio kreita: {out.name}",
+                        f"Backup created: {out.name}",
+                        f"Sauvegarde creee: {out.name}",
+                    )
+                )
+                last_backup_time = now
+            except (OSError, ValueError) as e:
+                error(
+                    tr_multi(
+                        f"Eraro dum sekurkopio: {e}",
+                        f"Backup error: {e}",
+                        f"Erreur de sauvegarde: {e}",
+                    )
+                )
+
+        for _ in range(60):
+            if shutdown_requested:
+                break
+            time.sleep(1)
+
+    info(
+        tr_multi(
+            "Daemono haltigita.",
+            "Daemon stopped.",
+            "Daemon arrete.",
+        )
+    )
+
+
+@app.command("install-systemd")
+def install_systemd() -> None:
+    """Instali systemd timer por axtomataj sekurkopioj."""
+    strategy = _service.load_auto_strategy()
+    if not strategy or not strategy.get("aktiva"):
+        error(
+            tr_multi(
+                "Neniu aktiva axtomata strategio.\nRulu: sekurkopio auto [dosierujo]",
+                "No active automatic strategy.\nRun: sekurkopio auto [directory]",
+                "Aucune strategie active.\nExecution: sekurkopio auto [repertoire]",
+            )
+        )
+        raise typer.Exit(1)
+
+    intervalo_min = strategy["intervalo"]
+
+    default_pw_file = str(Path.home() / ".config" / "A" / "backup_password.txt")
+    pw_file = typer.prompt(
+        tr_multi(
+            "Dosiero por pasvorto",
+            "Password file",
+            "Fichier mot de passe",
+        ),
+        default=default_pw_file,
+    ).strip()
+
+    pw_path = Path(pw_file).expanduser()
+    if not pw_path.exists():
+        if typer.confirm(
+            tr_multi(
+                "Dosiero ne ekzistas. Cxu krei gin?",
+                "File does not exist. Create it?",
+                "Le fichier n'existe pas. Le creer?",
+            )
+        ):
+            pasvorto = typer.prompt(
+                tr_multi("Pasvorto", "Password", "Mot de passe"),
+                hide_input=True,
+                confirmation_prompt=True,
+            )
+            pw_path.parent.mkdir(parents=True, exist_ok=True)
+            pw_path.write_text(pasvorto, encoding="utf-8")
+            pw_path.chmod(0o600)
+            info(
+                tr_multi(
+                    f"Pasvorto konservita al: {pw_path}",
+                    f"Password saved to: {pw_path}",
+                    f"Mot de passe enregistre: {pw_path}",
+                )
+            )
+        else:
+            raise typer.Exit(0)
+
+    systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+
+    service_file = systemd_dir / "A-sekurkopio.service"
+    timer_file = systemd_dir / "A-sekurkopio.timer"
+
+    service_content = """[Unit]
+Description=A automatic backup service
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=A sekurkopio daemon --pasvorto-dosiero {pw_file} --unufoje
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+""".format(pw_file=pw_path)
+
+    timer_content = f"""[Unit]
+Description=A automatic backup timer
+Requires=A-sekurkopio.service
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec={intervalo_min}min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+    service_file.write_text(service_content, encoding="utf-8")
+    timer_file.write_text(timer_content, encoding="utf-8")
+
+    info(
+        tr_multi(
+            f"Systemd dosieroj kreitaj:\n  {service_file}\n  {timer_file}",
+            f"Systemd files created:\n  {service_file}\n  {timer_file}",
+            f"Fichiers systemd creats:\n  {service_file}\n  {timer_file}",
+        )
+    )
+
+    import subprocess
+
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["systemctl", "--user", "enable", "A-sekurkopio.timer"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["systemctl", "--user", "start", "A-sekurkopio.timer"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        info(
+            tr_multi(
+                "Systemd timer ebligita kaj startita.",
+                "Systemd timer enabled and started.",
+                "Timer systemd active et demarre.",
+            )
+        )
+        info(
+            tr_multi(
+                "Por vidi staton:\n  systemctl --user status A-sekurkopio.timer",
+                "To view status:\n  systemctl --user status A-sekurkopio.timer",
+                "Pour voir le statut:\n  systemctl --user status A-sekurkopio.timer",
+            )
+        )
+    except subprocess.CalledProcessError as e:
+        error(
+            tr_multi(
+                f"Averto: Ne povis axtomate ebligi/starti la timer: {e}",
+                f"Warning: Could not enable/start timer automatically: {e}",
+                f"Attention: Impossible d'activer/demarrer le timer: {e}",
+            )
+        )
+    except subprocess.TimeoutExpired:
+        error(
+            tr_multi(
+                "Averto: Systemd komando ekster tempo.",
+                "Warning: systemd command timed out.",
+                "Attention: commande systemd expiree.",
+            )
+        )
+
+
+@app.command("install-cron")
+def install_cron() -> None:
+    """Aldoni cron laboron por axtomataj sekurkopioj."""
+    strategy = _service.load_auto_strategy()
+    if not strategy or not strategy.get("aktiva"):
+        error(
+            tr_multi(
+                "Neniu aktiva axtomata strategio.\nRulu: sekurkopio auto [dosierujo]",
+                "No active automatic strategy.\nRun: sekurkopio auto [directory]",
+                "Aucune strategie active.\nExecution: sekurkopio auto [repertoire]",
+            )
+        )
+        raise typer.Exit(1)
+
+    intervalo_min = strategy["intervalo"]
+
+    default_pw_file = str(Path.home() / ".config" / "A" / "backup_password.txt")
+    pw_file = typer.prompt(
+        tr_multi(
+            "Dosiero por pasvorto",
+            "Password file",
+            "Fichier mot de passe",
+        ),
+        default=default_pw_file,
+    ).strip()
+
+    pw_path = Path(pw_file).expanduser()
+    if not pw_path.exists():
+        if typer.confirm(
+            tr_multi(
+                "Dosiero ne ekzistas. Cxu krei gin?",
+                "File does not exist. Create it?",
+                "Le fichier n'existe pas. Le creer?",
+            )
+        ):
+            pasvorto = typer.prompt(
+                tr_multi("Pasvorto", "Password", "Mot de passe"),
+                hide_input=True,
+                confirmation_prompt=True,
+            )
+            pw_path.parent.mkdir(parents=True, exist_ok=True)
+            pw_path.write_text(pasvorto, encoding="utf-8")
+            pw_path.chmod(0o600)
+            info(
+                tr_multi(
+                    f"Pasvorto konservita al: {pw_path}",
+                    f"Password saved to: {pw_path}",
+                    f"Mot de passe enregistre: {pw_path}",
+                )
+            )
+        else:
+            raise typer.Exit(0)
+
+    import shutil
+
+    sekurkopio_bin = shutil.which("A") or "A"
+
+    cron_expr = f"*/{intervalo_min} * * * *"
+    cron_cmd = f"{sekurkopio_bin} sekurkopio daemon --pasvorto-dosiero {pw_path} --unufoje"
+    cron_line = f"{cron_expr} {cron_cmd} >/dev/null 2>&1\n"
+
+    info(
+        tr_multi(
+            f"Aldononta cron linion:\n{cron_line}",
+            f"Adding cron line:\n{cron_line}",
+            f"Ajout de la ligne cron:\n{cron_line}",
+        )
+    )
+
+    if not typer.confirm(
+        tr_multi(
+            "Cxu aldoni cxi tion al via crontab?",
+            "Add this to your crontab?",
+            "Ajouter ceci a votre crontab?",
+        )
+    ):
+        raise typer.Exit(0)
+
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        current_crontab = result.stdout if result.returncode == 0 else ""
+
+        if "A-sekurkopio" in current_crontab or sekurkopio_bin in current_crontab:
+            info(
+                tr_multi(
+                    "Sekurkopio jam estas en crontab.",
+                    "Sekurkopio is already in crontab.",
+                    "Sekurkopio est deja dans le crontab.",
+                )
+            )
+            return
+
+        new_crontab = current_crontab + f"# A-sekurkopio\n{cron_line}"
+
+        subprocess.run(
+            ["crontab", "-"],
+            input=new_crontab,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        info(
+            tr_multi(
+                "Cron laboro aldonita.",
+                "Cron job added.",
+                "Tache cron ajoutee.",
+            )
+        )
+        info(
+            tr_multi(
+                "Por vidi vian crontab:\n  crontab -l",
+                "To view your crontab:\n  crontab -l",
+                "Pour voir votre crontab:\n  crontab -l",
+            )
+        )
+    except subprocess.CalledProcessError as e:
+        error(
+            tr_multi(
+                f"Eraro: {e}",
+                f"Error: {e}",
+                f"Erreur: {e}",
+            )
+        )
+    except subprocess.TimeoutExpired:
+        error(
+            tr_multi(
+                "Eraro: crontab komando ekster tempo.",
+                "Error: crontab command timed out.",
+                "Erreur: commande crontab expiree.",
+            )
+        )
+
+
+def _do_auto_backup(dosierujo: Path, pasvorto: str, nombro: int) -> Path:
+    """Create one auto-backup file. Returns the path created."""
+    import py7zr
+
+    dosierujo.mkdir(parents=True, exist_ok=True)
+
+    # Rotate old backups
+    files = sorted(
+        dosierujo.glob("A_backup_*.7z"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    while len(files) >= nombro:
+        files[0].unlink(missing_ok=True)
+        files = files[1:]
+
+    now_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    out = dosierujo / f"A_backup_{now_str}.7z"
+
+    files = _service.collect_data_files()
+    if not files:
+        raise ValueError("Neniuj datumoj por sekurkopio.")
+
+    with py7zr.SevenZipFile(str(out), "w", password=pasvorto) as szf:
+        for fp in files:
+            szf.write(fp, fp.name)
+
+    return out
+
+
 __all__ = ["app"]

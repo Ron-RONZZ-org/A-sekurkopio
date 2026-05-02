@@ -50,6 +50,9 @@ src/A_sekurkopio/
 | `sekurkopio importi <dosiero>` | Restore data from encrypted archive |
 | `sekurkopio auto [dosierujo]` | Configure automatic backups |
 | `sekurkopio historio` | Show backup history |
+| `sekurkopio daemon` | Run automatic backup daemon |
+| `sekurkopio install-systemd` | Set up systemd timer |
+| `sekurkopio install-cron` | Set up cron job |
 
 ## Features
 
