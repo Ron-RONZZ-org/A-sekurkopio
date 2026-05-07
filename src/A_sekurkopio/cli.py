@@ -1,6 +1,7 @@
+from __future__ import annotations
+from A import confirm_action
 """CLI commands for A-sekurkopio."""
 
-from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -645,7 +646,7 @@ def install_systemd() -> None:
 
     pw_path = Path(pw_file).expanduser()
     if not pw_path.exists():
-        if typer.confirm(
+        if confirm_action(
             tr_multi(
                 "Dosiero ne ekzistas. Cxu krei gin?",
                 "File does not exist. Create it?",
@@ -795,7 +796,7 @@ def install_cron() -> None:
 
     pw_path = Path(pw_file).expanduser()
     if not pw_path.exists():
-        if typer.confirm(
+        if confirm_action(
             tr_multi(
                 "Dosiero ne ekzistas. Cxu krei gin?",
                 "File does not exist. Create it?",
@@ -836,7 +837,7 @@ def install_cron() -> None:
         )
     )
 
-    if not typer.confirm(
+    if not confirm_action(
         tr_multi(
             "Cxu aldoni cxi tion al via crontab?",
             "Add this to your crontab?",
