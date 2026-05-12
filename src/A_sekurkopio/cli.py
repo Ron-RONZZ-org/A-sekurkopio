@@ -232,7 +232,7 @@ def historio_cmd() -> None:
             f"Historique (derniers {_HISTORY_MAX})",
         )
     )
-    table.add_column("#", style="dim")
+    table.add_column("#")
     table.add_column(
         tr_multi("Okazis", "Occurred", "Survenu"), style="cyan"
     )
