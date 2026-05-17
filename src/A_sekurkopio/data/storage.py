@@ -4,22 +4,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from A.data.base import SQLiteDB
+from A.data.base import SQLiteDB, backup_db, health_check
 from A.core.paths import data_dir
 
 
 def get_db() -> SQLiteDB:
-    """Get SQLiteDB instance for sekurkopio.
+    """Get SQLiteDB instance for sekurkopio with health check and backup.
 
     Returns:
         SQLiteDB instance connected to sekurkopio.db in data_dir()
     """
     db_path = data_dir() / "sekurkopio.db"
+    if not health_check(db_path):
+        from A.data.base import repair_db as _repair
+        _repair(db_path)
+    backup_db(db_path)
     db = SQLiteDB(db_path)
-
-    # Create tables if not exist
     _init_schema(db)
-
     return db
 
 
