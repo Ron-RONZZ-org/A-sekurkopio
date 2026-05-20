@@ -31,6 +31,9 @@ packages = ["src/A_sekurkopio"]
 testpaths = ["tests"]
 
 # Poetry kept for local path dependency
+[tool.uv.sources]
+a-core = { path = "../A-core", editable = true }
+
 [tool.poetry]
 name = "A-sekurkopio"
 version = "0.1.0"
