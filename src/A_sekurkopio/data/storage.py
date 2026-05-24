@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from A.data.base import SQLiteDB, backup_db, health_check
+from A.core.backup_targets import BackupTarget
 from A.core.paths import data_dir
 
 
@@ -22,6 +23,18 @@ def get_db() -> SQLiteDB:
     db = SQLiteDB(db_path)
     _init_schema(db)
     return db
+
+
+def get_backup_targets() -> list[BackupTarget]:
+    """Return backup targets for A-sekurkopio."""
+    return [
+        BackupTarget(
+            path=data_dir() / "sekurkopio.db",
+            category="data",
+            module="sekurkopio",
+            label="Sekurkopio database",
+        ),
+    ]
 
 
 def _init_schema(db: SQLiteDB) -> None:

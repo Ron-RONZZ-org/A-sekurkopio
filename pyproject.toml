@@ -24,6 +24,9 @@ dev = [
 [project.entry-points."A.commands"]
 sekurkopio = "A_sekurkopio.cli:app"
 
+[project.entry-points."A.backup"]
+sekurkopio = "A_sekurkopio.data.storage:get_backup_targets"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/A_sekurkopio"]
 

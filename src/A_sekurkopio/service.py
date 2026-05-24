@@ -65,14 +65,7 @@ class _SekurkopioService:
         )
 
     def collect_data_files(self) -> list[Path]:
-        """Collect A data files for backup."""
-        from A.core.paths import data_dir
+        """Collect A data files for backup via plugin discovery."""
+        from A.core.backup_targets import get_backup_targets
 
-        data_path = data_dir()
-        candidates = [
-            data_path / "vorto.db",
-            data_path / "encik.db",
-            data_path / "sistemo.db",
-            data_path / "sekurkopio.db",
-        ]
-        return [p for p in candidates if p.exists()]
+        return [t.path for t in get_backup_targets() if t.path.exists()]
