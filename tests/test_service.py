@@ -27,15 +27,23 @@ class TestCollectDataFiles:
 
     def test_collect_with_files(self, service, tmp_path: Path, monkeypatch) -> None:
         """Test collecting existing files."""
-        # Mock data_dir to return tmp_path
-        monkeypatch.setattr(
-            "A_sekurkopio.service.data_dir", lambda: tmp_path
-        )
+        from A.core.backup_targets import BackupTarget
 
         # Create test files
-        test_files = ["vorto.db", "encik.db"]
-        for fname in test_files:
-            (tmp_path / fname).touch()
+        test_files = [tmp_path / "vorto.db", tmp_path / "encik.db"]
+        for f in test_files:
+            f.touch()
+
+        # Mock get_backup_targets to return targets for our test files
+        targets = [
+            BackupTarget(path=f, module=f.stem, category="data")
+            for f in test_files
+        ]
+
+        monkeypatch.setattr(
+            "A.core.backup_targets.get_backup_targets",
+            lambda: targets,
+        )
 
         files = service.collect_data_files()
         assert len(files) == 2

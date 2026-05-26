@@ -1,7 +1,6 @@
 from __future__ import annotations
-from A import confirm_action
-"""CLI commands for A-sekurkopio."""
 
+"""CLI commands for A-sekurkopio."""
 
 import json
 from datetime import datetime, timezone
@@ -11,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from A import error, info, tr, tr_multi
+from A import error, info, tr, tr_multi, confirm_action
 from A.core.paths import data_dir
 
 from A_sekurkopio.service import get_service
@@ -98,7 +97,7 @@ def eksporti(
 
     try:
         count = _export_to_archive(out_path, pasvorto, formato, files)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, ImportError) as e:
         error(
             tr_multi(
                 f"Eksportado malsukcesis: {e}",
@@ -189,7 +188,7 @@ def importi(
 
     try:
         count = _import_from_archive(in_path, pasvorto, formato, overwrite=anstatauigi)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, ImportError) as e:
         error(
             tr_multi(
                 f"Importado malsukcesis: {e}",
@@ -378,7 +377,12 @@ def _export_to_archive(
                 zf.write(fp, fp.name)
         archive_path.write_bytes(buf.getvalue())
     else:
-        import py7zr
+        try:
+            import py7zr
+        except ImportError:
+            raise ImportError(
+                "py7zr is required for 7z backup. Install with: uv pip install A-sekurkopio[backup]"
+            )
 
         with py7zr.SevenZipFile(str(archive_path), "w", password=password) as szf:
             for fp in files:
@@ -411,7 +415,12 @@ def _import_from_archive(
                 count += 1
             return count
     else:
-        import py7zr
+        try:
+            import py7zr
+        except ImportError:
+            raise ImportError(
+                "py7zr is required for 7z backup. Install with: uv pip install A-sekurkopio[backup]"
+            )
 
         with py7zr.SevenZipFile(
             str(archive_path), "r", password=password
@@ -429,6 +438,17 @@ def _detect_formato(path: Path) -> str:
     if suffix == ".zip":
         return "zip"
     return "7z"
+
+
+def _log_error(fh, message: str) -> None:
+    """Log error message to file if file handle is open."""
+    if fh:
+        try:
+            ts = datetime.now(timezone.utc).isoformat()
+            fh.write(f"{ts} [ERROR] {message}\n")
+            fh.flush()
+        except OSError:
+            pass  # Ignore log file errors
 
 
 @app.command("daemon")
@@ -450,6 +470,15 @@ def daemon(
             "Fari unu sekurkopio kaj eliri (por systemd/cron).",
             "Run one backup and exit (for systemd/cron).",
             "Effectuer une sauvegarde et quitter (pour systemd/cron).",
+        ),
+    ),
+    log_dosiero: str | None = typer.Option(
+        None,
+        "--log-dosiero",
+        help=tr_multi(
+            "Dosiero por logi erarojn (se ne donita, iras al stderr).",
+            "File to log errors (if not given, goes to stderr).",
+            "Fichier pour journaliser les erreurs (sinon stderr).",
         ),
     ),
 ) -> None:
@@ -479,12 +508,12 @@ def daemon(
         raise typer.Exit(1)
 
     pw_path = Path(pasvorto_dosiero).expanduser()
-    if not pw_path.exists():
+    if not pw_path.is_file():
         error(
             tr_multi(
-                f"Pasvorta dosiero ne trovita: {pw_path}",
-                f"Password file not found: {pw_path}",
-                f"Fichier mot de passe non trouve: {pw_path}",
+                f"Pasvorta dosiero ne trovita aux ne estas regula dosiero: {pw_path}",
+                f"Password file not found or is not a regular file: {pw_path}",
+                f"Fichier mot de passe introuvable ou n'est pas un fichier regulier: {pw_path}",
             )
         )
         raise typer.Exit(1)
@@ -515,6 +544,23 @@ def daemon(
     intervalo_min = strategy["intervalo"]
     nombro = strategy["nombro"]
 
+    # Setup logging if --log-dosiero is provided
+    _log_fh = None
+    if log_dosiero:
+        try:
+            log_path = Path(log_dosiero).expanduser()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            _log_fh = open(log_path, "a", encoding="utf-8")
+        except OSError as e:
+            error(
+                tr_multi(
+                    f"Ne povis malfermo log-dosiero: {e}",
+                    f"Could not open log file: {e}",
+                    f"Impossible d'ouvrir le fichier journal: {e}",
+                )
+            )
+            raise typer.Exit(1) from e
+
     if unufoje:
         try:
             info(f"[*] {datetime.now(timezone.utc).isoformat()}")
@@ -534,7 +580,9 @@ def daemon(
                     f"Sauvegarde creee: {out.name}",
                 )
             )
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, ImportError) as e:
+            msg = str(e)
+            _log_error(_log_fh, msg)
             error(
                 tr_multi(
                     f"Eraro dum sekurkopio: {e}",
@@ -543,6 +591,9 @@ def daemon(
                 )
             )
             raise typer.Exit(1) from e
+        finally:
+            if _log_fh:
+                _log_fh.close()
         return
 
     info(
@@ -595,7 +646,9 @@ def daemon(
                     )
                 )
                 last_backup_time = now
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, ImportError) as e:
+                msg = str(e)
+                _log_error(_log_fh, msg)
                 error(
                     tr_multi(
                         f"Eraro dum sekurkopio: {e}",
@@ -911,7 +964,12 @@ def install_cron() -> None:
 
 def _do_auto_backup(dosierujo: Path, pasvorto: str, nombro: int) -> Path:
     """Create one auto-backup file. Returns the path created."""
-    import py7zr
+    try:
+        import py7zr
+    except ImportError:
+        raise ImportError(
+            "py7zr is required for 7z backup. Install with: uv pip install A-sekurkopio[backup]"
+        )
 
     dosierujo.mkdir(parents=True, exist_ok=True)
 
