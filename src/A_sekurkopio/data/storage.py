@@ -8,13 +8,27 @@ from A.data.base import SQLiteDB, backup_db, health_check
 from A.core.backup_targets import BackupTarget
 from A.core.paths import data_dir
 
+_db_instance: SQLiteDB | None = None
+
 
 def get_db() -> SQLiteDB:
-    """Get SQLiteDB instance for sekurkopio with health check and backup.
+    """Get or create the shared database connection (singleton).
+
+    All callers within the same process share one ``SQLiteDB`` instance,
+    which uses one cached SQLite connection. This avoids WAL/SHM conflicts
+    that occur when multiple connections access the same database file.
+
+    The connection is lazily created on first call and cached in
+    ``_db_instance``. Tests can reset the singleton by setting
+    ``A_sekurkopio.data.storage._db_instance = None`` in their teardown.
 
     Returns:
         SQLiteDB instance connected to sekurkopio.db in data_dir()
     """
+    global _db_instance
+    if _db_instance is not None:
+        return _db_instance
+
     db_path = data_dir() / "sekurkopio.db"
     if not health_check(db_path):
         from A.data.base import repair_db as _repair
@@ -22,6 +36,7 @@ def get_db() -> SQLiteDB:
     backup_db(db_path)
     db = SQLiteDB(db_path)
     _init_schema(db)
+    _db_instance = db
     return db
 
 
