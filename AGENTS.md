@@ -21,12 +21,16 @@ All source code must import from `A`, not duplicate utilities.
 
 ```
 src/A_sekurkopio/
-├── __init__.py       # Plugin exports (app)
-├── cli.py            # Typer app (Esperanto/English/French)
-├── service.py        # Business logic (backup/restore operations)
+├── __init__.py        # Plugin exports (app)
+├── cli.py             # Typer app (~85 lines) — app setup, historio, registrations
+├── export_cmd.py      # eksporti command + archive helpers (~118 lines)
+├── import_cmd.py      # importi command + archive restore helpers (~122 lines)
+├── auto_cmd.py        # auto + daemon commands + helpers (~340 lines)
+├── install_cmd.py     # install-systemd + install-cron commands (~304 lines)
+├── service.py         # Business logic (backup/restore operations)
 └── data/
-    ├── __init__.py   # Data layer exports
-    └── storage.py    # SQLite (uses A.data.base)
+    ├── __init__.py    # Data layer exports
+    └── storage.py     # SQLite (uses A.data.base) — get_db() singleton
 ```
 
 **Rule:** Service layer uses A-core, CLI layer uses Typer + A output utils.
@@ -73,10 +77,11 @@ PYTHONPATH=../A-core/src:src .venv/bin/python -m pytest tests/
 
 | Module | Tests | Description |
 |--------|-------|-------------|
-| `test_cli.py` | 7 | CLI commands via CliRunner |
+| `test_cli.py` | 8 | CLI commands via CliRunner |
 | `test_service.py` | 6 | Service layer operations |
+| `test_storage.py` | 3 | Storage layer (singleton, schema, WAL mode) |
 
-**Total: 13 tests**
+**Total: 17 tests — all passing**
 
 
 
