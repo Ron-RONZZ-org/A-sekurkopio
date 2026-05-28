@@ -38,7 +38,19 @@ def cmd_install_systemd() -> None:
     ).strip()
 
     pw_path = Path(pw_file).expanduser()
-    if not pw_path.exists():
+    if pw_path.is_dir():
+        error(
+            tr_multi(
+                f"{pw_path} estas dosierujo, ne pasvorta dosiero.\n"
+                f"Bonvolu specifi tekstan dosieron (ekz.: ~/.config/A/backup_password.txt)",
+                f"{pw_path} is a directory, not a password file.\n"
+                f"Please specify a text file (e.g.: ~/.config/A/backup_password.txt)",
+                f"{pw_path} est un repertoire, pas un fichier mot de passe.\n"
+                f"Veuillez specifier un fichier texte (ex.: ~/.config/A/backup_password.txt)",
+            )
+        )
+        raise typer.Exit(1)
+    if not pw_path.is_file():
         if confirm_action(
             tr_multi(
                 "Dosiero ne ekzistas. Cxu krei gin?",
@@ -187,7 +199,19 @@ def cmd_install_cron() -> None:
     ).strip()
 
     pw_path = Path(pw_file).expanduser()
-    if not pw_path.exists():
+    if pw_path.is_dir():
+        error(
+            tr_multi(
+                f"{pw_path} estas dosierujo, ne pasvorta dosiero.\n"
+                f"Bonvolu specifi tekstan dosieron (ekz.: ~/.config/A/backup_password.txt)",
+                f"{pw_path} is a directory, not a password file.\n"
+                f"Please specify a text file (e.g.: ~/.config/A/backup_password.txt)",
+                f"{pw_path} est un repertoire, pas un fichier mot de passe.\n"
+                f"Veuillez specifier un fichier texte (ex.: ~/.config/A/backup_password.txt)",
+            )
+        )
+        raise typer.Exit(1)
+    if not pw_path.is_file():
         if confirm_action(
             tr_multi(
                 "Dosiero ne ekzistas. Cxu krei gin?",
@@ -214,8 +238,39 @@ def cmd_install_cron() -> None:
             raise typer.Exit(0)
 
     import shutil
+    import subprocess
 
     sekurkopio_bin = shutil.which("A") or "A"
+
+    # Check for existing entry BEFORE showing the preview / asking confirmation
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        current_crontab = result.stdout if result.returncode == 0 else ""
+
+        if "A-sekurkopio" in current_crontab or sekurkopio_bin in current_crontab:
+            info(
+                tr_multi(
+                    "Sekurkopio jam estas en crontab. Neniu sango farita.",
+                    "Sekurkopio is already in crontab. No changes made.",
+                    "Sekurkopio est deja dans le crontab. Aucun changement.",
+                )
+            )
+            return
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        error(
+            tr_multi(
+                f"Ne povis legi crontab: {e}",
+                f"Could not read crontab: {e}",
+                f"Impossible de lire le crontab: {e}",
+            )
+        )
+        raise typer.Exit(1) from e
 
     cron_expr = f"*/{intervalo_min} * * * *"
     cron_cmd = (
@@ -241,28 +296,7 @@ def cmd_install_cron() -> None:
     ):
         raise typer.Exit(0)
 
-    import subprocess
-
     try:
-        result = subprocess.run(
-            ["crontab", "-l"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        current_crontab = result.stdout if result.returncode == 0 else ""
-
-        if "A-sekurkopio" in current_crontab or sekurkopio_bin in current_crontab:
-            info(
-                tr_multi(
-                    "Sekurkopio jam estas en crontab.",
-                    "Sekurkopio is already in crontab.",
-                    "Sekurkopio est deja dans le crontab.",
-                )
-            )
-            return
-
         new_crontab = current_crontab + f"# A-sekurkopio\n{cron_line}"
 
         subprocess.run(
