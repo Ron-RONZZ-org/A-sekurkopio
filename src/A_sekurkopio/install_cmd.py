@@ -12,8 +12,96 @@ from A_sekurkopio.service import get_service
 _service = get_service()
 
 
+def _resolve_pw_path(pw_path: Path) -> Path:
+    """Resolve password path, auto-creating ``backup_password.txt`` in dirs.
+
+    If *pw_path* is an existing **directory**, automatically set it to
+    ``pw_path / "backup_password.txt"``.  If the resulting file does not
+    exist, prompt the user to create it interactively.
+
+    Returns the final (possibly defaulted) file path, or raises
+    ``typer.Exit(0)`` if the user declines creation.
+    """
+    if pw_path.is_dir():
+        pw_path = pw_path / "backup_password.txt"
+        info(
+            tr_multi(
+                f"Estis dosierujo; uzas {pw_path}",
+                f"Was a directory; using {pw_path}",
+                f"Etait un repertoire; utilisation de {pw_path}",
+            )
+        )
+
+    if pw_path.is_file():
+        return pw_path
+
+    # File does not exist — offer to create
+    if not confirm_action(
+        tr_multi(
+            "Dosiero ne ekzistas. Cxu krei gin?",
+            "File does not exist. Create it?",
+            "Le fichier n'existe pas. Le creer?",
+        )
+    ):
+        raise typer.Exit(0)
+
+    pasvorto = typer.prompt(
+        tr_multi("Pasvorto", "Password", "Mot de passe"),
+        hide_input=True,
+        confirmation_prompt=True,
+    )
+    pw_path.parent.mkdir(parents=True, exist_ok=True)
+    pw_path.write_text(pasvorto, encoding="utf-8")
+    pw_path.chmod(0o600)
+    info(
+        tr_multi(
+            f"Pasvorto konservita al: {pw_path}",
+            f"Password saved to: {pw_path}",
+            f"Mot de passe enregistre: {pw_path}",
+        )
+    )
+    return pw_path
+
+
+def _prompt_pw_path() -> Path:
+    """Prompt for a password file path and resolve it."""
+    default_pw_file = str(Path.home() / ".config" / "A" / "backup_password.txt")
+    pw_file = typer.prompt(
+        tr_multi(
+            "Dosiero por pasvorto",
+            "Password file",
+            "Fichier mot de passe",
+        ),
+        default=default_pw_file,
+    ).strip()
+    return _resolve_pw_path(Path(pw_file).expanduser())
+
+
+# ── systemd ────────────────────────────────────────────────────────────────────
+
+
+def _systemd_run(*args: str, check: bool = True) -> bool:
+    """Run a ``systemctl --user`` command, returning success."""
+    import subprocess
+
+    try:
+        subprocess.run(
+            ["systemctl", "--user", *args],
+            check=check,
+            capture_output=True,
+            timeout=10,
+        )
+        return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+
+
 def cmd_install_systemd() -> None:
-    """Install systemd timer for automatic backups."""
+    """Install systemd timer for automatic backups.
+
+    If a previous timer/service exists, it is stopped and disabled
+    before the new files are written.
+    """
     strategy = _service.load_auto_strategy()
     if not strategy or not strategy.get("aktiva"):
         error(
@@ -25,57 +113,15 @@ def cmd_install_systemd() -> None:
         )
         raise typer.Exit(1)
 
+    pw_path = _prompt_pw_path()
     intervalo_min = strategy["intervalo"]
 
-    default_pw_file = str(Path.home() / ".config" / "A" / "backup_password.txt")
-    pw_file = typer.prompt(
-        tr_multi(
-            "Dosiero por pasvorto",
-            "Password file",
-            "Fichier mot de passe",
-        ),
-        default=default_pw_file,
-    ).strip()
+    # ── Stop & disable old units if present ──────────────────────────
+    _systemd_run("stop", "A-sekurkopio.timer", check=False)
+    _systemd_run("stop", "A-sekurkopio.service", check=False)
+    _systemd_run("disable", "A-sekurkopio.timer", check=False)
 
-    pw_path = Path(pw_file).expanduser()
-    if pw_path.is_dir():
-        error(
-            tr_multi(
-                f"{pw_path} estas dosierujo, ne pasvorta dosiero.\n"
-                f"Bonvolu specifi tekstan dosieron (ekz.: ~/.config/A/backup_password.txt)",
-                f"{pw_path} is a directory, not a password file.\n"
-                f"Please specify a text file (e.g.: ~/.config/A/backup_password.txt)",
-                f"{pw_path} est un repertoire, pas un fichier mot de passe.\n"
-                f"Veuillez specifier un fichier texte (ex.: ~/.config/A/backup_password.txt)",
-            )
-        )
-        raise typer.Exit(1)
-    if not pw_path.is_file():
-        if confirm_action(
-            tr_multi(
-                "Dosiero ne ekzistas. Cxu krei gin?",
-                "File does not exist. Create it?",
-                "Le fichier n'existe pas. Le creer?",
-            )
-        ):
-            pasvorto = typer.prompt(
-                tr_multi("Pasvorto", "Password", "Mot de passe"),
-                hide_input=True,
-                confirmation_prompt=True,
-            )
-            pw_path.parent.mkdir(parents=True, exist_ok=True)
-            pw_path.write_text(pasvorto, encoding="utf-8")
-            pw_path.chmod(0o600)
-            info(
-                tr_multi(
-                    f"Pasvorto konservita al: {pw_path}",
-                    f"Password saved to: {pw_path}",
-                    f"Mot de passe enregistre: {pw_path}",
-                )
-            )
-        else:
-            raise typer.Exit(0)
-
+    # ── Write new unit files ─────────────────────────────────────────
     systemd_dir = Path.home() / ".config" / "systemd" / "user"
     systemd_dir.mkdir(parents=True, exist_ok=True)
 
@@ -120,6 +166,7 @@ WantedBy=timers.target
         )
     )
 
+    # ── Reload & start ───────────────────────────────────────────────
     import subprocess
 
     try:
@@ -173,8 +220,15 @@ WantedBy=timers.target
         )
 
 
+# ── cron ───────────────────────────────────────────────────────────────────────
+
+
 def cmd_install_cron() -> None:
-    """Add cron job for automatic backups."""
+    """Add/replace cron job for automatic backups.
+
+    If a previous ``A-sekurkopio`` cron line exists, it is removed
+    and replaced with the new one.
+    """
     strategy = _service.load_auto_strategy()
     if not strategy or not strategy.get("aktiva"):
         error(
@@ -186,63 +240,22 @@ def cmd_install_cron() -> None:
         )
         raise typer.Exit(1)
 
+    pw_path = _prompt_pw_path()
     intervalo_min = strategy["intervalo"]
-
-    default_pw_file = str(Path.home() / ".config" / "A" / "backup_password.txt")
-    pw_file = typer.prompt(
-        tr_multi(
-            "Dosiero por pasvorto",
-            "Password file",
-            "Fichier mot de passe",
-        ),
-        default=default_pw_file,
-    ).strip()
-
-    pw_path = Path(pw_file).expanduser()
-    if pw_path.is_dir():
-        error(
-            tr_multi(
-                f"{pw_path} estas dosierujo, ne pasvorta dosiero.\n"
-                f"Bonvolu specifi tekstan dosieron (ekz.: ~/.config/A/backup_password.txt)",
-                f"{pw_path} is a directory, not a password file.\n"
-                f"Please specify a text file (e.g.: ~/.config/A/backup_password.txt)",
-                f"{pw_path} est un repertoire, pas un fichier mot de passe.\n"
-                f"Veuillez specifier un fichier texte (ex.: ~/.config/A/backup_password.txt)",
-            )
-        )
-        raise typer.Exit(1)
-    if not pw_path.is_file():
-        if confirm_action(
-            tr_multi(
-                "Dosiero ne ekzistas. Cxu krei gin?",
-                "File does not exist. Create it?",
-                "Le fichier n'existe pas. Le creer?",
-            )
-        ):
-            pasvorto = typer.prompt(
-                tr_multi("Pasvorto", "Password", "Mot de passe"),
-                hide_input=True,
-                confirmation_prompt=True,
-            )
-            pw_path.parent.mkdir(parents=True, exist_ok=True)
-            pw_path.write_text(pasvorto, encoding="utf-8")
-            pw_path.chmod(0o600)
-            info(
-                tr_multi(
-                    f"Pasvorto konservita al: {pw_path}",
-                    f"Password saved to: {pw_path}",
-                    f"Mot de passe enregistre: {pw_path}",
-                )
-            )
-        else:
-            raise typer.Exit(0)
 
     import shutil
     import subprocess
 
     sekurkopio_bin = shutil.which("A") or "A"
 
-    # Check for existing entry BEFORE showing the preview / asking confirmation
+    cron_expr = f"*/{intervalo_min} * * * *"
+    cron_cmd = (
+        f"{sekurkopio_bin} sekurkopio daemon "
+        f"--pasvorto-dosiero {pw_path} --unufoje"
+    )
+    cron_line = f"{cron_expr} {cron_cmd} >/dev/null 2>&1\n"
+
+    # ── Read current crontab & strip old A-sekurkopio lines ──────────
     try:
         result = subprocess.run(
             ["crontab", "-l"],
@@ -252,16 +265,6 @@ def cmd_install_cron() -> None:
             timeout=5,
         )
         current_crontab = result.stdout if result.returncode == 0 else ""
-
-        if "A-sekurkopio" in current_crontab or sekurkopio_bin in current_crontab:
-            info(
-                tr_multi(
-                    "Sekurkopio jam estas en crontab. Neniu sango farita.",
-                    "Sekurkopio is already in crontab. No changes made.",
-                    "Sekurkopio est deja dans le crontab. Aucun changement.",
-                )
-            )
-            return
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         error(
             tr_multi(
@@ -272,13 +275,25 @@ def cmd_install_cron() -> None:
         )
         raise typer.Exit(1) from e
 
-    cron_expr = f"*/{intervalo_min} * * * *"
-    cron_cmd = (
-        f"{sekurkopio_bin} sekurkopio daemon "
-        f"--pasvorto-dosiero {pw_path} --unufoje"
-    )
-    cron_line = f"{cron_expr} {cron_cmd} >/dev/null 2>&1\n"
+    # Filter out old lines referencing A-sekurkopio
+    filtered_lines: list[str] = []
+    removed_count = 0
+    for line in current_crontab.splitlines(keepends=True):
+        if "A-sekurkopio" in line or sekurkopio_bin in line:
+            removed_count += 1
+        else:
+            filtered_lines.append(line)
 
+    if removed_count:
+        info(
+            tr_multi(
+                f"Forigis {removed_count} malnovan(j)n linio(j)n el crontab.",
+                f"Removed {removed_count} old line(s) from crontab.",
+                f"Supprime {removed_count} ancienne(s) ligne(s) du crontab.",
+            )
+        )
+
+    # ── Preview ──────────────────────────────────────────────────────
     info(
         tr_multi(
             f"Aldononta cron linion:\n{cron_line}",
@@ -296,9 +311,10 @@ def cmd_install_cron() -> None:
     ):
         raise typer.Exit(0)
 
-    try:
-        new_crontab = current_crontab + f"# A-sekurkopio\n{cron_line}"
+    # ── Write ────────────────────────────────────────────────────────
+    new_crontab = "".join(filtered_lines) + f"# A-sekurkopio\n{cron_line}"
 
+    try:
         subprocess.run(
             ["crontab", "-"],
             input=new_crontab,

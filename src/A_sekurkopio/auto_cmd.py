@@ -195,6 +195,8 @@ def cmd_daemon(
         raise typer.Exit(1)
 
     pw_path = Path(pasvorto_dosiero).expanduser()
+    if pw_path.is_dir():
+        pw_path = pw_path / "backup_password.txt"
     if not pw_path.is_file():
         error(
             tr_multi(
