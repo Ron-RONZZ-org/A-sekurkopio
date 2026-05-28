@@ -24,10 +24,24 @@ def get_service():
 
 
 class _SekurkopioService:
-    """Backup and restore service."""
+    """Backup and restore service.
+
+    The database connection is lazily initialized (``_db``) so that
+    module-level ``_service = get_service()`` in command modules does
+    **not** touch the real database at import time.  Tests that reset
+    ``A_DIR`` or monkeypatch ``data_dir`` need only reset the service
+    singleton before the first method call.
+    """
 
     def __init__(self):
-        self.db = get_db()
+        self._db = None
+
+    @property
+    def db(self):
+        """Lazy database connection — created on first access."""
+        if self._db is None:
+            self._db = get_db()
+        return self._db
 
     def push_history(self, ago: str, detaloj: dict | None = None) -> None:
         """Record a history entry, keeping at most _HISTORY_MAX rows."""
