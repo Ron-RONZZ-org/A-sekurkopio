@@ -14,6 +14,7 @@ from A_sekurkopio.service import get_service
 
 from A_sekurkopio.export_cmd import cmd_eksporti
 from A_sekurkopio.import_cmd import cmd_importi
+from A_sekurkopio.restore_cmd import cmd_restaurigi
 from A_sekurkopio.auto_cmd import cmd_auto, cmd_daemon
 from A_sekurkopio.install_cmd import cmd_install_systemd, cmd_install_cron
 
@@ -76,6 +77,7 @@ def historio_cmd() -> None:
 
 app.command(name="eksporti")(cmd_eksporti)
 app.command(name="importi")(cmd_importi)
+app.command(name="restaurigi")(cmd_restaurigi)
 app.command(name="auto")(cmd_auto)
 app.command(name="daemon")(cmd_daemon)
 app.command(name="install-systemd")(cmd_install_systemd)
