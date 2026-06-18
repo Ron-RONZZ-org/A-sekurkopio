@@ -37,12 +37,6 @@ def _log_error(fh, message: str) -> None:
 
 def _do_auto_backup(dosierujo: Path, pasvorto: str, nombro: int) -> Path:
     """Create one auto-backup file. Returns the path created."""
-    if nombro < 1:
-        raise ValueError(
-            f"nombro ({nombro}) devas esti almenaŭ 1. "
-            f"Korektu vian strategion per: sekurkopio auto --nombro N"
-        )
-
     try:
         import py7zr
     except ImportError:
@@ -53,23 +47,12 @@ def _do_auto_backup(dosierujo: Path, pasvorto: str, nombro: int) -> Path:
 
     dosierujo.mkdir(parents=True, exist_ok=True)
 
-    try:
-        files = sorted(
-            dosierujo.glob("A_backup_*.7z"),
-            key=lambda p: p.stat().st_mtime,
-        )
-    except OSError as e:
-        raise OSError(
-            f"Ne povas legi dosierujon {dosierujo}: {e}"
-        ) from e
-
+    files = sorted(
+        dosierujo.glob("A_backup_*.7z"),
+        key=lambda p: p.stat().st_mtime,
+    )
     while len(files) >= nombro:
-        try:
-            files[0].unlink()
-        except OSError as e:
-            raise OSError(
-                f"Ne povas forigi malnovan kopion {files[0]}: {e}"
-            ) from e
+        files[0].unlink(missing_ok=True)
         files = files[1:]
 
     now_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
@@ -195,8 +178,6 @@ def cmd_daemon(
         raise typer.Exit(1)
 
     pw_path = Path(pasvorto_dosiero).expanduser()
-    if pw_path.is_dir():
-        pw_path = pw_path / "backup_password.txt"
     if not pw_path.is_file():
         error(
             tr_multi(
@@ -232,29 +213,6 @@ def cmd_daemon(
     dosierujo = Path(strategy["dosierujo"])
     intervalo_min = strategy["intervalo"]
     nombro = strategy["nombro"]
-
-    if nombro < 1:
-        error(
-            tr_multi(
-                f"Erara nombro ({nombro}) en strategio. "
-                f"Rulu: sekurkopio auto --nombro 5",
-                f"Invalid max copies ({nombro}) in strategy. "
-                f"Run: sekurkopio auto --nombro 5",
-                f"Nombre max invalide ({nombro}) dans la strategie. "
-                f"Executez: sekurkopio auto --nombro 5",
-            )
-        )
-        raise typer.Exit(1)
-
-    if not dosierujo.exists():
-        error(
-            tr_multi(
-                f"Backup dosierujo ne ekzistas: {dosierujo}",
-                f"Backup directory does not exist: {dosierujo}",
-                f"Le repertoire de sauvegarde n'existe pas: {dosierujo}",
-            )
-        )
-        raise typer.Exit(1)
 
     _log_fh = None
     if log_dosiero:
